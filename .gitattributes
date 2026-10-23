@@ -1,0 +1,4 @@
+# Keep each script usable on its platform even with core.autocrlf
+adb-qr-pair     text eol=lf
+*.cmd           text eol=crlf
+*.ps1           text eol=crlf
