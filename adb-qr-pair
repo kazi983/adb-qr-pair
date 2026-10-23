@@ -3,15 +3,15 @@
 # then connect to it. One-shot, apt-only dependencies.
 #
 #   sudo apt install adb qrencode avahi-utils
-#   ./adb-qr-pair            # 10 s countdown to scan, 10 s more to connect
-#   ADB_QR_TIMEOUT=30 ./adb-qr-pair
+#   ./adb-qr-pair            # 30 s countdown to scan, 30 s more to connect
+#   ADB_QR_TIMEOUT=60 ./adb-qr-pair
 #
 # Phone: Settings > Developer options > Wireless debugging >
 #        Pair device with QR code  (same Wi-Fi as this PC)
 
 set -euo pipefail
 
-TIMEOUT="${ADB_QR_TIMEOUT:-10}"
+TIMEOUT="${ADB_QR_TIMEOUT:-30}"
 
 red()   { printf '\033[31m%s\033[0m\n' "$*" >&2; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }

@@ -40,7 +40,7 @@ git -C ~/src/adb-qr-pair pull
 
 ## Usage
 
-1. On the phone, go to **Settings → Developer options → Wireless debugging → Pair device with QR code**. Open the scanner first, because the countdown is short.
+1. On the phone, go to **Settings → Developer options → Wireless debugging → Pair device with QR code**. Opening the scanner before you run the command saves time.
 2. On the PC, run:
 
    ```bash
@@ -49,10 +49,10 @@ git -C ~/src/adb-qr-pair pull
 
 3. Scan the QR code. The rest happens automatically.
 
-You get 10 seconds to scan, then another 10 seconds for the connect step. For more time:
+You get 30 seconds to scan, then another 30 seconds for the connect step. For more time:
 
 ```bash
-ADB_QR_TIMEOUT=30 adb-qr-pair
+ADB_QR_TIMEOUT=60 adb-qr-pair
 ```
 
 ## How it works
