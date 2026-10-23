@@ -3,15 +3,15 @@
 # then connect to it. One-shot, apt-only dependencies.
 #
 #   sudo apt install adb qrencode avahi-utils
-#   ./adb-qr-pair            # default timeout 120 s
-#   ADB_QR_TIMEOUT=60 ./adb-qr-pair
+#   ./adb-qr-pair            # 10 s countdown to scan, 10 s more to connect
+#   ADB_QR_TIMEOUT=30 ./adb-qr-pair
 #
 # Phone: Settings > Developer options > Wireless debugging >
 #        Pair device with QR code  (same Wi-Fi as this PC)
 
 set -euo pipefail
 
-TIMEOUT="${ADB_QR_TIMEOUT:-120}"
+TIMEOUT="${ADB_QR_TIMEOUT:-10}"
 
 red()   { printf '\033[31m%s\033[0m\n' "$*" >&2; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -43,13 +43,33 @@ fi
 # ---------- helpers ----------
 rand_alnum() { head -c 64 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-"$1"; }
 
-# Print "ip port" for the first resolved IPv4 service of TYPE whose
-# field FIELD (4 = service name, 8 = address) equals VALUE.
-find_service() {
-  local type=$1 field=$2 value=$3
-  timeout 6 avahi-browse -rpt "$type" 2>/dev/null |
-    awk -F';' -v f="$field" -v v="$value" \
-      '$1=="=" && $3=="IPv4" && $f==v { print $8, $9; exit }' || true
+tmpdir=$(mktemp -d)
+browse_pids=()
+cleanup() { kill "${browse_pids[@]}" 2>/dev/null || true; rm -rf "$tmpdir"; }
+trap cleanup EXIT
+
+# wait_for_service TYPE FIELD VALUE SECONDS LABEL
+# Browses mDNS in the background and shows a countdown until a resolved IPv4
+# service of TYPE has field FIELD (4 = service name, 8 = address) == VALUE.
+# On success sets FOUND_IP / FOUND_PORT and returns 0; on timeout returns 1.
+wait_for_service() {
+  local type=$1 field=$2 value=$3 secs=$4 label=$5
+  local out="$tmpdir/${type//[^a-z]/_}" end=$((SECONDS + secs)) left found=""
+  avahi-browse -rp "$type" >"$out" 2>/dev/null &
+  browse_pids+=("$!")
+  [[ -t 1 ]] || echo "$label (up to ${secs}s)"
+  while :; do
+    found=$(awk -F';' -v f="$field" -v v="$value" \
+      '$1=="=" && $3=="IPv4" && $f==v { print $8, $9; exit }' "$out")
+    [[ -n $found ]] && break
+    left=$((end - SECONDS))
+    ((left > 0)) || break
+    [[ -t 1 ]] && printf '\r\033[K\033[2m%s %2ds  (Ctrl-C to cancel)\033[0m' "$label" "$left"
+    sleep 0.2
+  done
+  [[ -t 1 ]] && printf '\r\033[K'
+  [[ -n $found ]] || return 1
+  read -r FOUND_IP FOUND_PORT <<<"$found"
 }
 
 # Print the SSID of the Wi-Fi network this PC is on (empty if none).
@@ -66,8 +86,6 @@ current_ssid() {
     iwgetid -r 2>/dev/null || true
   fi
 }
-
-deadline=$((SECONDS + TIMEOUT))
 
 fail_with_hint() {
   red "$1"
@@ -101,16 +119,11 @@ else
   echo "PC Wi-Fi: not connected (wired?) — phone must be on the same network/subnet"
 fi
 echo "Scan with: Developer options > Wireless debugging > Pair device with QR code"
-dim "Waiting up to ${TIMEOUT}s for the phone…  (Ctrl-C to cancel)"
 
 # ---------- 2. wait for the phone's pairing service ----------
-pair_ip="" pair_port=""
-while ((SECONDS < deadline)); do
-  read -r pair_ip pair_port < <(find_service _adb-tls-pairing._tcp 4 "$NAME"; echo) || true
-  [[ -n $pair_ip ]] && break
-  sleep 1
-done
-[[ -n $pair_ip ]] || fail_with_hint "Timed out: the phone's pairing service never appeared."
+wait_for_service _adb-tls-pairing._tcp 4 "$NAME" "$TIMEOUT" "Waiting for the phone…" ||
+  fail_with_hint "Timed out: the phone's pairing service never appeared."
+pair_ip=$FOUND_IP pair_port=$FOUND_PORT
 
 echo "Found phone at ${pair_ip}:${pair_port}, pairing…"
 
@@ -122,14 +135,9 @@ fi
 green "Paired."
 
 # ---------- 4. find the connect port and connect ----------
-dim "Looking for the debug connection port…"
-conn_ip="" conn_port=""
-while ((SECONDS < deadline)); do
-  read -r conn_ip conn_port < <(find_service _adb-tls-connect._tcp 8 "$pair_ip"; echo) || true
-  [[ -n $conn_ip ]] && break
-  sleep 1
-done
-[[ -n $conn_ip ]] || fail_with_hint "Paired, but timed out finding the phone's connect port."
+wait_for_service _adb-tls-connect._tcp 8 "$pair_ip" "$TIMEOUT" "Finding the connect port…" ||
+  fail_with_hint "Paired, but timed out finding the phone's connect port."
+conn_ip=$FOUND_IP conn_port=$FOUND_PORT
 
 out=$(adb connect "${conn_ip}:${conn_port}" 2>&1) || true
 echo "$out"
